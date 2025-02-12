@@ -1,0 +1,106 @@
+---
+title: "Anomaly Detection - Decomposition and HMM"
+author: "Udayveer Singh Andotra"
+date: "2024-04-15"
+output: html_document
+---
+
+```{r message=FALSE, warning=FALSE}
+library(tseries) 
+
+# install.packages("devtools")
+# devtools::install_github("twitter/AnomalyDetection")
+library(AnomalyDetection)
+
+# install.packages("depmixS4")
+library(depmixS4)
+```
+
+```{r message=FALSE, warning=FALSE}
+# Load the NAB dataset (assuming you've already downloaded the relevant file)
+nab_data_url <- "https://raw.githubusercontent.com/numenta/NAB/master/data/realTweets/Twitter_volume_IBM.csv"
+twitter_volume <- read.csv(nab_data_url, header = TRUE)
+
+df_twitter_volume <-as.data.frame(twitter_volume)
+df_twitter_volume$timestamp<-as.POSIXct(df_twitter_volume$timestamp, format="%Y-%m-%d %H:%M:%S", tz="")
+
+nab_result_url <- "https://raw.githubusercontent.com/numenta/NAB/master/results/ARTime/realTweets/ARTime_Twitter_volume_IBM.csv"
+twitter_volume_result <- read.csv(nab_result_url, header = TRUE)
+
+df_twitter_volume_result <-as.data.frame(twitter_volume_result)
+df_twitter_volume_result$timestamp<-as.POSIXct(df_twitter_volume_result$timestamp, format="%Y-%m-%d %H:%M:%S", tz="")
+
+
+plot(df_twitter_volume_result$timestamp, df_twitter_volume_result$value, type = "l", col = "#9932CC",
+     xlab = "Timestamp", ylab = "Twitter Volume", main = "Twitter Volume Anomalies (ARTime)")
+points(df_twitter_volume_result$timestamp, ifelse(df_twitter_volume_result$label==1,df_twitter_volume_result$value,NA), col = "#7AC5CD", pch = 20)
+legend("topright", legend = "Benchmark Anomalies", col = "#7AC5CD", pch = 20)
+
+table(df_twitter_volume_result$label)
+
+# 1590 anomalies
+```
+
+```{r message=FALSE, warning=FALSE}
+twitter_ts<-ts(df_twitter_volume[,2],start=0, frequency = 5)
+plot.ts(twitter_ts, main="Twitter Volume for IBM", ylab="value")
+twitter_dc<-decompose(twitter_ts)
+plot(twitter_dc)
+plot(twitter_dc$random,col="#9932CC",lwd=0.5, main="Decomposed Series: Random", ylab="random")
+
+mean(na.omit(df_twitter_volume$value))
+sd(na.omit(df_twitter_volume$value))
+```
+
+```{r message=FALSE, warning=FALSE}
+
+# Detect anomalies using Twitter's AnomalyDetection
+anomalies1 <- AnomalyDetectionTs(df_twitter_volume, max_anoms = 0.05, plot=TRUE, direction='both')
+
+# Visualize the anomalies
+plot(df_twitter_volume$timestamp, df_twitter_volume$value, type = "l", col = "#9932CC",
+     xlab = "Timestamp", ylab = "Twitter Volume", main = "Twitter Volume Anomalies (AnomalyDetection)")
+points(anomalies1$anoms$timestamp, anomalies1$anoms$anoms, col = "#7AC5CD", pch = 20)
+legend("topright", legend = "Anomalies", col = "#7AC5CD", pch = 20)
+
+# 539 anomalies
+```
+
+```{r message=FALSE, warning=FALSE}
+
+# Normalize the data
+df_twitter_volume$value <- scale(df_twitter_volume$value)
+
+interval_length <- 288  # Assuming 5-minute intervals (288 intervals per day)
+sequences <- split(df_twitter_volume$value, rep(1:(nrow(df_twitter_volume) %/% interval_length), each = interval_length))
+
+# Define the HMM model
+hmm_model <- depmix(value ~ 1, data = df_twitter_volume, nstates = 8, family = gaussian())
+
+# Fit the model
+hmm_fit <- fit(hmm_model)
+
+# Get the estimated states
+estimated_states <- posterior(hmm_fit)$state
+
+# Plot the estimated states
+plot(df_twitter_volume$timestamp, estimated_states, type = "l", col = "#4682B4",lwd=0.5,
+     xlab = "Timestamp", ylab = "State", main = "Estimated States (HMM)")
+
+# Calculate the residuals (difference between observed value and estimated state mean)
+residuals <- df_twitter_volume$value - estimated_states
+
+# Set a threshold for anomaly detection (e.g., based on quantiles or domain knowledge)
+threshold <- quantile(abs(residuals), 0.95)
+
+# Identify anomalies
+anomalies2 <- df_twitter_volume[abs(residuals) > threshold, ]
+
+# Visualize anomalies
+plot(df_twitter_volume$timestamp, df_twitter_volume$value, type = "l", col = "#9932CC",lwd=0.5,
+     xlab = "Timestamp", ylab = "Twitter Volume", main = "Twitter Volume Anomalies (HMM)")
+points(anomalies2$timestamp, anomalies2$value, col = "#7AC5CD", pch = 20)
+legend("topright", legend = "Anomalies", col = "#7AC5CD", pch = 20)
+
+# 776 anomalies
+```
