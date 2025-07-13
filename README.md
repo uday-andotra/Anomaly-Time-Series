@@ -27,7 +27,6 @@ The repository includes code for reproduction, the raw dataset, and a detailed P
 - [Methods](#methods)
 - [Results](#results)
 - [References](#references)
-- [License](#license)
 
 ## Files
 
